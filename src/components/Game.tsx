@@ -6,44 +6,65 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GameMode } from "@/app/page";
 import { characters } from "@/data/characters";
-import { Timer, Mic, Volume2, XCircle } from "lucide-react";
+import { Timer, Mic, Volume2, XCircle, Heart, Info, ArrowRight } from "lucide-react";
 
 interface GameProps {
     mode: GameMode;
+    totalQuestions: number;
     onExit: () => void;
 }
 
-export default function Game({ mode, onExit }: GameProps) {
+export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [shuffledChars, setShuffledChars] = useState([...characters]);
     const [timeLeft, setTimeLeft] = useState(10);
     const [userInput, setUserInput] = useState("");
     const [isListening, setIsListening] = useState(false);
-    const [gameState, setGameState] = useState<"playing" | "correct" | "wrong" | "timeout" | "ended">("playing");
+    const [gameState, setGameState] = useState<"playing" | "correct" | "wrong" | "timeout" | "description" | "ended">("playing");
     const [score, setScore] = useState(0);
+
+    // New Feature States
+    const [lives, setLives] = useState(totalQuestions > 20 ? 5 : 3);
+    const [showHint, setShowHint] = useState(false);
+    const [descriptionTimeLeft, setDescriptionTimeLeft] = useState(10);
 
     const recognitionRef = useRef<any>(null);
 
-    // Initialize and shuffle
+    // Initialize and shuffle, slicing based on selected totalQuestions
     useEffect(() => {
-        setShuffledChars([...characters].sort(() => Math.random() - 0.5));
-    }, []);
+        const shuffled = [...characters].sort(() => Math.random() - 0.5);
+        setShuffledChars(shuffled.slice(0, totalQuestions));
+    }, [totalQuestions]);
 
-    // Timer logic
+    // Timer logic for gameplay and description phase
     useEffect(() => {
-        if (gameState !== "playing") return;
+        if (gameState === "playing") {
+            if (timeLeft <= 0) {
+                handleWrongOrTimeout("timeout");
+                return;
+            }
+            // Show hint after 5 seconds (when 5 seconds left on a 10s timer)
+            if (timeLeft === 5 && !showHint) {
+                setShowHint(true);
+            }
 
-        if (timeLeft <= 0) {
-            setGameState("timeout");
-            return;
+            const timer = setInterval(() => {
+                setTimeLeft(t => t - 1);
+            }, 1000);
+            return () => clearInterval(timer);
         }
 
-        const timer = setInterval(() => {
-            setTimeLeft(t => t - 1);
-        }, 1000);
-
-        return () => clearInterval(timer);
-    }, [timeLeft, gameState]);
+        if (gameState === "description") {
+            if (descriptionTimeLeft <= 0) {
+                nextQuestion();
+                return;
+            }
+            const timer = setInterval(() => {
+                setDescriptionTimeLeft(t => t - 1);
+            }, 1000);
+            return () => clearInterval(timer);
+        }
+    }, [timeLeft, descriptionTimeLeft, gameState, showHint]);
 
     // Speech Recognition setup
     useEffect(() => {
@@ -112,13 +133,32 @@ export default function Game({ mode, onExit }: GameProps) {
         return false;
     };
 
+    const handleWrongOrTimeout = (state: "wrong" | "timeout") => {
+        setGameState(state);
+        const newLives = lives - 1;
+        setLives(newLives);
+
+        if (newLives <= 0) {
+            setTimeout(() => setGameState("ended"), 1500);
+        } else {
+            // After showing X or Timeout, go to next question after a brief delay
+            // If they got it wrong, we don't necessarily show the description to save time, 
+            // but let's just move to next question.
+            setTimeout(nextQuestion, 1500);
+        }
+    };
+
     const checkAnswer = (inputVal: string) => {
         if (gameState !== "playing") return;
 
         if (isAnswerCorrect(inputVal)) {
             setGameState("correct");
             setScore(s => s + 1);
-            setTimeout(nextQuestion, 1500);
+            // Move to description phase after showing the 'correct' overlay briefly
+            setTimeout(() => {
+                setGameState("description");
+                setDescriptionTimeLeft(10);
+            }, 1500);
         }
     };
 
@@ -129,20 +169,23 @@ export default function Game({ mode, onExit }: GameProps) {
         if (isAnswerCorrect(userInput)) {
             setGameState("correct");
             setScore(s => s + 1);
-            setTimeout(nextQuestion, 1500);
+            setTimeout(() => {
+                setGameState("description");
+                setDescriptionTimeLeft(10);
+            }, 1500);
         } else {
-            setGameState("wrong");
-            setTimeout(nextQuestion, 1500);
+            handleWrongOrTimeout("wrong");
         }
     };
 
     const nextQuestion = () => {
-        if (currentIndex + 1 >= shuffledChars.length) {
+        if (currentIndex + 1 >= shuffledChars.length || lives <= 0) {
             setGameState("ended");
         } else {
             setCurrentIndex(i => i + 1);
             setTimeLeft(10);
             setUserInput("");
+            setShowHint(false);
             setGameState("playing");
             if (mode === "speaking") {
                 startListening();
@@ -174,8 +217,18 @@ export default function Game({ mode, onExit }: GameProps) {
                         인물 퀴즈
                     </h2>
                 </div>
-                <div className="flex items-center gap-4">
-                    <div className="flex flex-col items-end">
+                <div className="flex items-center gap-6">
+                    {/* Lives Display */}
+                    <div className="flex items-center gap-1">
+                        {Array.from({ length: totalQuestions > 20 ? 5 : 3 }).map((_, i) => (
+                            <Heart
+                                key={i}
+                                className={`w-6 h-6 ${i < lives ? 'fill-red-500 text-red-500' : 'fill-zinc-800 text-zinc-700'}`}
+                            />
+                        ))}
+                    </div>
+
+                    <div className="flex flex-col items-end border-l border-white/10 pl-6">
                         <span className="text-xs text-zinc-500 uppercase tracking-widest font-semibold">Score</span>
                         <div className="text-2xl font-bold text-white leading-none">
                             {score}
@@ -196,16 +249,56 @@ export default function Game({ mode, onExit }: GameProps) {
                         animate={{ scale: 1, opacity: 1 }}
                         className="flex flex-col items-center justify-center bg-zinc-900/50 p-16 rounded-[3rem] border border-white/10 backdrop-blur-xl shadow-2xl"
                     >
-                        <h1 className="text-5xl font-bold mb-4 text-white tracking-tight">게임 완료</h1>
+                        <h1 className="text-5xl font-bold mb-4 text-white tracking-tight">
+                            {lives <= 0 ? "게임 오버" : "게임 완료"}
+                        </h1>
                         <p className="text-2xl text-zinc-400 mb-12">최종 기록: <span className="text-white font-bold">{score}</span> <span className="text-lg">/ {shuffledChars.length}</span></p>
                         <Button size="lg" onClick={onExit} className="text-lg px-10 py-7 rounded-2xl bg-white text-black hover:bg-zinc-200 font-semibold transition-all">
                             메인으로 돌아가기
                         </Button>
                     </motion.div>
+                ) : gameState === "description" ? (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="w-full max-w-4xl flex flex-col items-center bg-zinc-900/60 p-10 rounded-[2.5rem] border border-white/10 backdrop-blur-xl shadow-[0_0_50px_rgba(0,0,0,0.5)]"
+                    >
+                        <div className="w-full flex justify-between items-center mb-8">
+                            <h2 className="text-3xl font-bold text-white">정답: {currentChar?.name}</h2>
+                            <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-2 rounded-full">
+                                <Timer className="w-5 h-5 text-indigo-400" />
+                                <span className="text-indigo-400 font-mono text-xl font-bold">{descriptionTimeLeft}s</span>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col md:flex-row gap-8 w-full items-center">
+                            {currentChar && (
+                                <div
+                                    className="w-48 h-64 md:w-64 md:h-80 rounded-[1.5rem] bg-cover bg-center shrink-0 border border-white/10 shadow-xl"
+                                    style={{ backgroundImage: `url("${encodeURI(currentChar.image)}")` }}
+                                />
+                            )}
+                            <div className="flex flex-col justify-center">
+                                <p className="text-lg md:text-xl leading-relaxed text-zinc-300 font-medium">
+                                    {currentChar?.description || "설명이 없습니다."}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="w-full flex justify-end mt-10">
+                            <Button
+                                size="lg"
+                                onClick={nextQuestion}
+                                className="bg-white text-black hover:bg-zinc-200 text-lg px-8 rounded-xl font-semibold gap-2 transition-all"
+                            >
+                                다음 문제로 <ArrowRight className="w-5 h-5" />
+                            </Button>
+                        </div>
+                    </motion.div>
                 ) : (
                     <div className="w-full flex flex-col items-center">
                         {/* Status Bar: Question Number & Timer */}
-                        <div className="w-full max-w-2xl px-6 py-4 bg-white/5 border border-white/10 rounded-2xl flex justify-between items-center mb-10 backdrop-blur-md">
+                        <div className="w-full max-w-2xl px-6 py-4 bg-white/5 border border-white/10 rounded-2xl flex justify-between items-center mb-6 backdrop-blur-md">
                             <div className="flex items-center gap-3">
                                 <div className="px-3 py-1 rounded-lg bg-white/10 text-sm font-semibold text-zinc-300">
                                     Q {currentIndex + 1}
@@ -227,6 +320,23 @@ export default function Game({ mode, onExit }: GameProps) {
                                     {timeLeft}
                                 </div>
                             </div>
+                        </div>
+
+                        {/* Hint Area */}
+                        <div className="h-12 mb-4 w-full max-w-xl flex items-center justify-center">
+                            <AnimatePresence>
+                                {showHint && currentChar?.hint && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0 }}
+                                        className="flex items-center gap-2 bg-indigo-500/20 text-indigo-300 px-6 py-2 rounded-full border border-indigo-500/30 backdrop-blur-sm"
+                                    >
+                                        <Info className="w-4 h-4" />
+                                        <span className="font-medium text-sm">{currentChar.hint}</span>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
 
                         {/* Character Image Card */}

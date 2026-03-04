@@ -3,16 +3,17 @@
 import { useState } from "react";
 import Landing from "@/components/Landing";
 import Game from "@/components/Game";
-import Image from "next/image";
 
 export type GameMode = "typing" | "speaking" | null;
 
 export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [gameMode, setGameMode] = useState<GameMode>(null);
+  const [totalQuestions, setTotalQuestions] = useState<number>(10);
 
-  const startGame = (mode: GameMode) => {
+  const startGame = (mode: GameMode, questions: number) => {
     setGameMode(mode);
+    setTotalQuestions(questions);
     setIsPlaying(true);
   };
 
@@ -26,7 +27,7 @@ export default function Home() {
       {!isPlaying ? (
         <Landing onStart={startGame} />
       ) : (
-        <Game mode={gameMode!} onExit={endGame} />
+        <Game mode={gameMode!} totalQuestions={totalQuestions} onExit={endGame} />
       )}
     </main>
   );
