@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { characters } from "@/data/characters";
 import { GameMode } from "@/app/page";
-import { Mic, Keyboard, Settings2, Play } from "lucide-react";
+import { Mic, Keyboard, Settings2, Play, BookOpen } from "lucide-react";
 
 interface LandingProps {
     onStart: (mode: GameMode, totalQuestions: number) => void;
@@ -16,6 +16,10 @@ export default function Landing({ onStart }: LandingProps) {
     const [selectedMode, setSelectedMode] = useState<GameMode>(null);
 
     const handleModeSelect = (mode: GameMode) => {
+        if (mode === "explanation") {
+            onStart(mode, 0); // 설명모드는 문제 수가 필요 없음
+            return;
+        }
         setSelectedMode(mode);
         setStep("questions");
     };
@@ -100,6 +104,15 @@ export default function Landing({ onStart }: LandingProps) {
                             >
                                 <Mic className="mr-2 w-5 h-5 transition-transform group-hover:scale-110" />
                                 말하기 모드
+                            </Button>
+
+                            <Button
+                                size="lg"
+                                onClick={() => handleModeSelect("explanation")}
+                                className="text-lg px-8 py-8 rounded-2xl bg-indigo-600 border border-indigo-500 text-white hover:bg-indigo-500 transition-all font-semibold group shadow-[0_0_30px_rgba(99,102,241,0.3)]"
+                            >
+                                <BookOpen className="mr-2 w-5 h-5 transition-transform group-hover:scale-110" />
+                                설명 모드
                             </Button>
                         </div>
                     </motion.div>

@@ -3,8 +3,9 @@
 import { useState } from "react";
 import Landing from "@/components/Landing";
 import Game from "@/components/Game";
+import ExplanationMode from "@/components/ExplanationMode";
 
-export type GameMode = "typing" | "speaking" | null;
+export type GameMode = "typing" | "speaking" | "explanation" | null;
 
 export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -26,6 +27,8 @@ export default function Home() {
     <main className="min-h-screen bg-neutral-900 text-white font-sans overflow-hidden">
       {!isPlaying ? (
         <Landing onStart={startGame} />
+      ) : gameMode === "explanation" ? (
+        <ExplanationMode onExit={endGame} />
       ) : (
         <Game mode={gameMode!} totalQuestions={totalQuestions} onExit={endGame} />
       )}
