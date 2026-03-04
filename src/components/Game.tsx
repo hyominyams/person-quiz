@@ -20,6 +20,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     const [timeLeft, setTimeLeft] = useState(10);
     const [userInput, setUserInput] = useState("");
     const [isListening, setIsListening] = useState(false);
+    const [micError, setMicError] = useState<string | null>(null);
     const [gameState, setGameState] = useState<"playing" | "correct" | "wrong" | "timeout" | "description" | "ended">("playing");
     const [score, setScore] = useState(0);
 
@@ -86,14 +87,28 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                 recognition.onerror = (event: any) => {
                     console.error("Speech recognition error", event.error);
                     setIsListening(false);
+                    if (event.error === 'not-allowed') {
+                        setMicError("마이크 권한이 차단되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
+                    } else if (event.error === 'no-speech') {
+                        // Ignore no-speech errors, we'll just show 'waiting...'
+                    } else {
+                        setMicError(`마이크 오류: ${event.error}`);
+                    }
                 };
 
                 recognition.onend = () => {
                     setIsListening(false);
                 };
 
+                // Clear previous errors when starting anew
+                recognition.onstart = () => {
+                    setMicError(null);
+                };
+
                 recognitionRef.current = recognition;
                 startListening();
+            } else {
+                setMicError("이 브라우저는 음성 인식을 지원하지 않습니다. 크롬 브라우저를 사용해주세요.");
             }
         }
 
@@ -425,25 +440,55 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                                 </form>
                             ) : (
                                 <div className="flex flex-col items-center">
-                                    <div className={`p-6 rounded-3xl mb-4 flex items-center justify-center ${isListening ? 'bg-white/10 shadow-[0_0_30px_rgba(255,255,255,0.1)]' : 'bg-transparent'} border border-white/10 transition-all duration-300 backdrop-blur-sm`}>
-                                        <div className={`p-4 rounded-full ${isListening ? 'bg-white' : 'bg-white/5'}`}>
-                                            {isListening ? <Volume2 className="w-8 h-8 text-black animate-pulse" /> : <Mic className="w-8 h-8 text-zinc-500" />}
+                                    <div className={`relative p-6 rounded-3xl mb-4 flex items-center justify-center transition-all duration-300 backdrop-blur-sm
+                                        ${micError ? 'bg-red-500/10 border-red-500/30' :
+                                            isListening ? 'bg-white/10 shadow-[0_0_30px_rgba(255,255,255,0.1)] border-white/20' :
+                                                'bg-black/20 border-white/5'} border`}>
+
+                                        {/* Ripple effect when listening */}
+                                        {isListening && (
+                                            <>
+                                                <div className="absolute inset-0 rounded-3xl bg-white/5 animate-ping opacity-75" />
+                                                <div className="absolute inset-[-10px] rounded-[2rem] bg-white/5 animate-pulse opacity-50" />
+                                            </>
+                                        )}
+
+                                        <div className={`relative z-10 p-4 rounded-full transition-colors duration-300
+                                            ${micError ? 'bg-red-500/20 text-red-400' :
+                                                isListening ? 'bg-white text-black' : 'bg-white/5 text-zinc-500'}`}>
+                                            {isListening ? <Volume2 className="w-8 h-8 animate-pulse" /> : <Mic className="w-8 h-8" />}
                                         </div>
                                     </div>
-                                    <div className="text-xl font-medium text-zinc-300 text-center min-h-[3rem] px-8">
+
+                                    {micError ? (
+                                        <div className="text-red-400 text-sm font-medium text-center bg-red-500/10 px-4 py-2 rounded-lg border border-red-500/20 mb-2">
+                                            {micError}
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-green-500 animate-pulse' : 'bg-zinc-600'}`} />
+                                            <span className={`text-sm font-medium ${isListening ? 'text-green-400' : 'text-zinc-500'}`}>
+                                                {isListening ? '듣고 있습니다...' : '마이크 꺼짐'}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    <div className="text-xl font-medium text-zinc-300 text-center min-h-[3rem] px-8 py-2 w-full bg-white/5 rounded-xl border border-white/5">
                                         {userInput ? (
                                             <span className="text-white drop-shadow-md">{userInput}</span>
                                         ) : (
-                                            <span className="text-zinc-600 font-light">마이크에 대고 말해주세요</span>
+                                            <span className="text-zinc-600 font-light italic">
+                                                {isListening ? '(말씀하시면 이곳에 텍스트가 표시됩니다)' : '아래 버튼을 눌러 다시 활성화해주세요'}
+                                            </span>
                                         )}
                                     </div>
-                                    {!isListening && gameState === "playing" && (
+
+                                    {!isListening && gameState === "playing" && !micError && (
                                         <Button
                                             onClick={startListening}
-                                            variant="ghost"
-                                            className="mt-4 text-zinc-400 hover:text-white hover:bg-white/5 rounded-xl border border-transparent hover:border-white/10"
+                                            className="mt-6 bg-indigo-600 text-white hover:bg-indigo-500 rounded-xl border border-transparent shadow-lg hover:shadow-indigo-500/25 px-8 font-medium transition-all"
                                         >
-                                            <Mic className="mr-2 w-4 h-4" /> 다시 듣기
+                                            <Mic className="mr-2 w-4 h-4" /> 마이크 켜기
                                         </Button>
                                     )}
                                 </div>
