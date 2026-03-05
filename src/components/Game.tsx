@@ -22,12 +22,17 @@ const HINT_REVEAL_TIME_LEFT = Math.floor(GAME_TIME_LIMIT / 2);
 const DANGER_TIME_THRESHOLD = 5;
 
 export default function Game({ mode, totalQuestions, onExit }: GameProps) {
+    const isSpeechMode = mode === "speaking";
+    const isDescriptionQuizMode = mode === "descriptionQuiz";
+    const isTextInputMode = mode === "typing" || isDescriptionQuizMode;
+    const supportsSpeechInput = isTextInputMode || isSpeechMode;
+
     const [currentIndex, setCurrentIndex] = useState(0);
     const [shuffledChars, setShuffledChars] = useState([...characters]);
     const [timeLeft, setTimeLeft] = useState(GAME_TIME_LIMIT);
     const [userInput, setUserInput] = useState("");
     const [isListening, setIsListening] = useState(false);
-    const [isMicEnabled, setIsMicEnabled] = useState(mode === "speaking");
+    const [isMicEnabled, setIsMicEnabled] = useState(isSpeechMode);
     const [micError, setMicError] = useState<string | null>(null);
     const [gameState, setGameState] = useState<GameState>("playing");
     const [score, setScore] = useState(0);
@@ -40,9 +45,10 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     const recognitionRef = useRef<any>(null);
     const hasAnsweredRef = useRef(false);
     const isListeningRef = useRef(false);
-    const isMicEnabledRef = useRef(mode === "speaking");
+    const isMicEnabledRef = useRef(isSpeechMode);
     const gameStateRef = useRef<GameState>("playing");
     const restartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isManualStopRef = useRef(false);
 
     // Initialize and shuffle, slicing based on selected totalQuestions
     useEffect(() => {
@@ -102,6 +108,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
         if (isListeningRef.current) return;
 
         clearRestartTimer();
+        isManualStopRef.current = false;
 
         try {
             recognitionRef.current.start();
@@ -112,6 +119,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     const stopListening = () => {
         clearRestartTimer();
+        isManualStopRef.current = true;
         isListeningRef.current = false;
         setIsListening(false);
         if (recognitionRef.current) {
@@ -128,7 +136,6 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
             isMicEnabledRef.current = false;
             setIsMicEnabled(false);
             stopListening();
-            setUserInput("");
             return;
         }
 
@@ -142,7 +149,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     // Speech Recognition setup
     useEffect(() => {
-        if (typeof window === "undefined" || mode !== "speaking") return;
+        if (typeof window === "undefined" || !supportsSpeechInput) return;
 
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -186,27 +193,33 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
         };
 
         recognition.onerror = (event: any) => {
-            console.error("Speech recognition error", event.error);
+            const errorType = typeof event.error === "string"
+                ? event.error.trim().toLowerCase()
+                : "";
+
             isListeningRef.current = false;
             setIsListening(false);
 
-            if (event.error === "not-allowed") {
+            // Ignore expected stop/idle errors from browser speech engines.
+            if (isManualStopRef.current || errorType === "aborted" || errorType === "no-speech") {
+                return;
+            }
+
+            console.error("Speech recognition error", event.error);
+
+            if (errorType === "not-allowed") {
                 setMicError("마이크 권한이 차단되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
                 setIsMicEnabled(false);
                 isMicEnabledRef.current = false;
                 return;
             }
-
-            if (event.error === "no-speech" || event.error === "aborted") {
-                return;
-            }
-
-            setMicError(`마이크 오류: ${event.error}`);
+            setMicError(`마이크 오류: ${errorType || "unknown"}`);
         };
 
         recognition.onend = () => {
             isListeningRef.current = false;
             setIsListening(false);
+            isManualStopRef.current = false;
 
             if (!isMicEnabledRef.current) return;
             if (gameStateRef.current !== "playing" || hasAnsweredRef.current) return;
@@ -234,12 +247,24 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
             isListeningRef.current = false;
             setIsListening(false);
         };
-    }, [mode, currentIndex]);
+    }, [currentIndex, supportsSpeechInput]);
 
     const currentChar = shuffledChars[currentIndex];
+    const gameTitle = isDescriptionQuizMode ? "설명 인물 퀴즈" : "인물 퀴즈";
+    const questionDescription = currentChar?.elementaryDescription || currentChar?.description || "설명이 없습니다.";
+    const answerDescription = isDescriptionQuizMode
+        ? questionDescription
+        : currentChar?.description || "설명이 없습니다.";
 
     const normalizeText = (text: string) =>
         text.replace(/[^a-zA-Z0-9가-힣]/g, "").toLowerCase();
+
+    const isLooseMatch = (input: string, candidate: string) => {
+        if (!input || !candidate) return false;
+        if (input === candidate) return true;
+        if (input.includes(candidate)) return true;
+        return input.length >= 2 && candidate.includes(input);
+    };
 
     const isAnswerCorrect = (inputVal: string) => {
         if (!currentChar) return false;
@@ -247,12 +272,12 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
         const normalizedAnswer = normalizeText(currentChar.name);
 
         if (!normalizedInput) return false;
-        if (normalizedInput === normalizedAnswer || normalizedInput.includes(normalizedAnswer)) return true;
+        if (isLooseMatch(normalizedInput, normalizedAnswer)) return true;
 
         if ('synonyms' in currentChar && Array.isArray(currentChar.synonyms)) {
             return currentChar.synonyms.some((synonym: string) => {
                 const normalizedSynonym = normalizeText(synonym);
-                return normalizedInput === normalizedSynonym || normalizedInput.includes(normalizedSynonym);
+                return isLooseMatch(normalizedInput, normalizedSynonym);
             });
         }
         return false;
@@ -260,7 +285,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     const handleCorrect = () => {
         hasAnsweredRef.current = true;
-        if (mode === "speaking") {
+        if (isMicEnabledRef.current) {
             stopListening();
         }
         setGameState("correct");
@@ -275,7 +300,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     const handleWrongOrTimeout = (state: "wrong" | "timeout") => {
         if (hasAnsweredRef.current) return;
         hasAnsweredRef.current = true;
-        if (mode === "speaking") {
+        if (isMicEnabledRef.current) {
             stopListening();
         }
         setGameState(state);
@@ -294,7 +319,6 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     const checkAnswer = (inputVal: string) => {
         if (gameStateRef.current !== "playing" || hasAnsweredRef.current) return;
-        if (mode === "speaking" && (!isMicEnabledRef.current || !isListeningRef.current)) return;
 
         if (isAnswerCorrect(inputVal)) {
             handleCorrect();
@@ -314,7 +338,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     const nextQuestion = () => {
         if (currentIndex + 1 >= shuffledChars.length || lives <= 0) {
-            if (mode === "speaking") {
+            if (isMicEnabledRef.current) {
                 stopListening();
             }
             setGameState("ended");
@@ -325,7 +349,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
             setShowHint(false);
             setGameState("playing");
             hasAnsweredRef.current = false;
-            if (mode === "speaking" && isMicEnabledRef.current) {
+            if (isMicEnabledRef.current) {
                 startListening();
             }
         }
@@ -368,7 +392,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                         <span className="text-xl font-bold text-white">Q</span>
                     </div>
                     <h2 className="text-xl font-medium tracking-wide text-zinc-200">
-                        인물 퀴즈
+                        {gameTitle}
                     </h2>
                 </div>
                 <div className="flex items-center gap-6">
@@ -434,7 +458,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                             )}
                             <div className="flex flex-col justify-center">
                                 <p className="text-lg md:text-xl leading-relaxed text-zinc-300 font-medium">
-                                    {currentChar?.description || "설명이 없습니다."}
+                                    {answerDescription}
                                 </p>
                             </div>
                         </div>
@@ -479,7 +503,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                         {/* Hint Area */}
                         <div className="h-12 mb-4 w-full max-w-xl flex items-center justify-center">
                             <AnimatePresence>
-                                {showHint && currentChar?.hint && (
+                                {!isDescriptionQuizMode && showHint && currentChar?.hint && (
                                     <motion.div
                                         initial={{ opacity: 0, y: -10 }}
                                         animate={{ opacity: 1, y: 0 }}
@@ -493,17 +517,29 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                             </AnimatePresence>
                         </div>
 
-                        {/* Character Image Card */}
+                        {/* Question Card */}
                         <AnimatePresence mode="wait">
                             <motion.div
-                                key={currentIndex}
+                                key={`${mode}-${currentIndex}`}
                                 initial={{ opacity: 0, y: 20, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
                                 transition={{ duration: 0.4, ease: "easeOut" }}
-                                className="relative w-72 h-96 md:w-[26rem] md:h-[34rem] rounded-[2rem] overflow-hidden border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] mb-12 bg-zinc-900/50 flex items-center justify-center backdrop-blur-sm group"
+                                className={`relative overflow-hidden mb-12 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-sm flex items-center justify-center rounded-[2rem] ${isDescriptionQuizMode
+                                    ? "w-full max-w-3xl min-h-[22rem] md:min-h-[25rem] bg-zinc-900/70 p-8 md:p-12"
+                                    : "w-72 h-96 md:w-[26rem] md:h-[34rem] bg-zinc-900/50 group"
+                                    }`}
                             >
-                                {currentChar ? (
+                                {isDescriptionQuizMode ? (
+                                    <div className="relative z-10 flex h-full w-full flex-col justify-center gap-8">
+                                        <div className="inline-flex items-center self-start px-4 py-2 rounded-full border border-emerald-400/30 bg-emerald-500/15 text-emerald-200 text-sm font-medium tracking-wide">
+                                            설명을 읽고 인물을 맞혀보세요
+                                        </div>
+                                        <p className="text-2xl md:text-3xl leading-relaxed font-semibold text-zinc-100">
+                                            {questionDescription}
+                                        </p>
+                                    </div>
+                                ) : currentChar ? (
                                     <div
                                         className="w-full h-full bg-cover bg-center transition-transform duration-700 group-hover:scale-105"
                                         style={{ backgroundImage: `url("${encodeURI(currentChar.image)}")` }}
