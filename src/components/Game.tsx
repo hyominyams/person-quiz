@@ -14,10 +14,15 @@ interface GameProps {
     onExit: () => void;
 }
 
+const GAME_TIME_LIMIT = 30;
+const DESCRIPTION_TIME_LIMIT = 10;
+const HINT_REVEAL_TIME_LEFT = Math.floor(GAME_TIME_LIMIT / 2);
+const DANGER_TIME_THRESHOLD = 5;
+
 export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [shuffledChars, setShuffledChars] = useState([...characters]);
-    const [timeLeft, setTimeLeft] = useState(10);
+    const [timeLeft, setTimeLeft] = useState(GAME_TIME_LIMIT);
     const [userInput, setUserInput] = useState("");
     const [isListening, setIsListening] = useState(false);
     const [micError, setMicError] = useState<string | null>(null);
@@ -27,9 +32,10 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     // New Feature States
     const [lives, setLives] = useState(totalQuestions > 20 ? 5 : 3);
     const [showHint, setShowHint] = useState(false);
-    const [descriptionTimeLeft, setDescriptionTimeLeft] = useState(10);
+    const [descriptionTimeLeft, setDescriptionTimeLeft] = useState(DESCRIPTION_TIME_LIMIT);
 
     const recognitionRef = useRef<any>(null);
+    const hasAnsweredRef = useRef(false);
 
     // Initialize and shuffle, slicing based on selected totalQuestions
     useEffect(() => {
@@ -44,8 +50,8 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                 handleWrongOrTimeout("timeout");
                 return;
             }
-            // Show hint after 5 seconds (when 5 seconds left on a 10s timer)
-            if (timeLeft === 5 && !showHint) {
+            // Show hint after half of the total time has elapsed.
+            if (timeLeft === HINT_REVEAL_TIME_LEFT && !showHint) {
                 setShowHint(true);
             }
 
@@ -78,10 +84,11 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                 recognition.interimResults = false;
 
                 recognition.onresult = (event: any) => {
-                    const current = event.resultIndex;
-                    const transcript = event.results[current][0].transcript.trim().replace(/\s+/g, "");
+                    const transcript = Array.from(event.results)
+                        .map((result: any) => result[0]?.transcript ?? "")
+                        .join(" ")
+                        .trim();
                     setUserInput(transcript);
-                    checkAnswer(transcript);
                 };
 
                 recognition.onerror = (event: any) => {
@@ -132,23 +139,57 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     const currentChar = shuffledChars[currentIndex];
 
+    const normalizeText = (text: string) =>
+        text.replace(/[^a-zA-Z0-9가-힣]/g, "").toLowerCase();
+
     const isAnswerCorrect = (inputVal: string) => {
         if (!currentChar) return false;
-        const normalizedInput = inputVal.replace(/\s+/g, "").toLowerCase();
-        const normalizedAnswer = currentChar.name.replace(/\s+/g, "").toLowerCase();
+        const normalizedInput = normalizeText(inputVal);
+        const normalizedAnswer = normalizeText(currentChar.name);
 
-        if (normalizedInput.includes(normalizedAnswer)) return true;
+        if (!normalizedInput) return false;
+        if (normalizedInput === normalizedAnswer || normalizedInput.includes(normalizedAnswer)) return true;
 
         if ('synonyms' in currentChar && Array.isArray(currentChar.synonyms)) {
             return currentChar.synonyms.some((synonym: string) => {
-                const normalizedSynonym = synonym.replace(/\s+/g, "").toLowerCase();
-                return normalizedInput.includes(normalizedSynonym);
+                const normalizedSynonym = normalizeText(synonym);
+                return normalizedInput === normalizedSynonym || normalizedInput.includes(normalizedSynonym);
             });
         }
         return false;
     };
 
+    const stopListening = () => {
+        if (recognitionRef.current) {
+            try {
+                recognitionRef.current.stop();
+            } catch {
+                // Ignore stop errors when recognition is already stopped.
+            }
+        }
+        setIsListening(false);
+    };
+
+    const handleCorrect = () => {
+        hasAnsweredRef.current = true;
+        if (mode === "speaking") {
+            stopListening();
+        }
+        setGameState("correct");
+        setScore(s => s + 1);
+        // Move to description phase after showing the 'correct' overlay briefly
+        setTimeout(() => {
+            setGameState("description");
+            setDescriptionTimeLeft(DESCRIPTION_TIME_LIMIT);
+        }, 1500);
+    };
+
     const handleWrongOrTimeout = (state: "wrong" | "timeout") => {
+        if (hasAnsweredRef.current) return;
+        hasAnsweredRef.current = true;
+        if (mode === "speaking") {
+            stopListening();
+        }
         setGameState(state);
         const newLives = lives - 1;
         setLives(newLives);
@@ -164,44 +205,40 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     };
 
     const checkAnswer = (inputVal: string) => {
-        if (gameState !== "playing") return;
+        if (gameState !== "playing" || hasAnsweredRef.current) return;
 
         if (isAnswerCorrect(inputVal)) {
-            setGameState("correct");
-            setScore(s => s + 1);
-            // Move to description phase after showing the 'correct' overlay briefly
-            setTimeout(() => {
-                setGameState("description");
-                setDescriptionTimeLeft(10);
-            }, 1500);
+            handleCorrect();
         }
     };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (gameState !== "playing") return;
+        if (gameState !== "playing" || hasAnsweredRef.current) return;
 
         if (isAnswerCorrect(userInput)) {
-            setGameState("correct");
-            setScore(s => s + 1);
-            setTimeout(() => {
-                setGameState("description");
-                setDescriptionTimeLeft(10);
-            }, 1500);
+            handleCorrect();
         } else {
             handleWrongOrTimeout("wrong");
         }
     };
+
+    useEffect(() => {
+        if (mode !== "speaking" || gameState !== "playing") return;
+        if (!userInput.trim()) return;
+        checkAnswer(userInput);
+    }, [userInput, mode, gameState]);
 
     const nextQuestion = () => {
         if (currentIndex + 1 >= shuffledChars.length || lives <= 0) {
             setGameState("ended");
         } else {
             setCurrentIndex(i => i + 1);
-            setTimeLeft(10);
+            setTimeLeft(GAME_TIME_LIMIT);
             setUserInput("");
             setShowHint(false);
             setGameState("playing");
+            hasAnsweredRef.current = false;
             if (mode === "speaking") {
                 startListening();
             }
@@ -324,13 +361,13 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                             <div className="flex items-center gap-3">
                                 <div className="w-32 h-2 bg-zinc-800 rounded-full overflow-hidden">
                                     <motion.div
-                                        className={`h-full ${timeLeft <= 3 ? "bg-red-500" : "bg-indigo-500"}`}
+                                        className={`h-full ${timeLeft <= DANGER_TIME_THRESHOLD ? "bg-red-500" : "bg-indigo-500"}`}
                                         initial={{ width: "100%" }}
-                                        animate={{ width: `${(timeLeft / 10) * 100}%` }}
+                                        animate={{ width: `${(timeLeft / GAME_TIME_LIMIT) * 100}%` }}
                                         transition={{ duration: 1, ease: "linear" }}
                                     />
                                 </div>
-                                <div className={`flex items-center gap-1.5 font-mono text-xl font-medium w-16 justify-end ${timeLeft <= 3 ? "text-red-400" : "text-zinc-300"}`}>
+                                <div className={`flex items-center gap-1.5 font-mono text-xl font-medium w-16 justify-end ${timeLeft <= DANGER_TIME_THRESHOLD ? "text-red-400" : "text-zinc-300"}`}>
                                     <Timer className="w-5 h-5 opacity-70" />
                                     {timeLeft}
                                 </div>
