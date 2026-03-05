@@ -5,7 +5,7 @@ import Landing from "@/components/Landing";
 import Game from "@/components/Game";
 import ExplanationMode from "@/components/ExplanationMode";
 
-export type GameMode = "typing" | "speaking" | "explanation" | null;
+export type GameMode = "typing" | "speaking" | "descriptionQuiz" | "explanation" | null;
 
 export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);

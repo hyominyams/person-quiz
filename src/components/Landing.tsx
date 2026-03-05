@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { characters } from "@/data/characters";
 import { GameMode } from "@/app/page";
-import { Mic, Keyboard, Settings2, Play, BookOpen } from "lucide-react";
+import { Mic, Keyboard, BookOpen, MessageSquareQuote } from "lucide-react";
 
 interface LandingProps {
     onStart: (mode: GameMode, totalQuestions: number) => void;
@@ -108,6 +108,15 @@ export default function Landing({ onStart }: LandingProps) {
 
                             <Button
                                 size="lg"
+                                onClick={() => handleModeSelect("descriptionQuiz")}
+                                className="text-lg px-8 py-8 rounded-2xl bg-emerald-600 border border-emerald-500 text-white hover:bg-emerald-500 transition-all font-semibold group shadow-[0_0_30px_rgba(16,185,129,0.3)]"
+                            >
+                                <MessageSquareQuote className="mr-2 w-5 h-5 transition-transform group-hover:scale-110" />
+                                설명 맞추기
+                            </Button>
+
+                            <Button
+                                size="lg"
                                 onClick={() => handleModeSelect("explanation")}
                                 className="text-lg px-8 py-8 rounded-2xl bg-indigo-600 border border-indigo-500 text-white hover:bg-indigo-500 transition-all font-semibold group shadow-[0_0_30px_rgba(99,102,241,0.3)]"
                             >
@@ -164,7 +173,7 @@ export default function Landing({ onStart }: LandingProps) {
                                 className="h-auto flex flex-col items-center justify-center p-8 rounded-2xl bg-indigo-600 border border-indigo-500 text-white hover:bg-indigo-500 transition-all shadow-[0_0_30px_rgba(99,102,241,0.3)] group"
                             >
                                 <span className="text-4xl font-black mb-2 text-white">ALL</span>
-                                <span className="text-sm font-medium text-indigo-200">27문제 (라이프 5)</span>
+                                <span className="text-sm font-medium text-indigo-200">{characters.length}문제 (라이프 5)</span>
                             </Button>
                         </div>
                     </motion.div>

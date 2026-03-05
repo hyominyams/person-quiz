@@ -594,25 +594,60 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
                         {/* Input Area */}
                         <div className="w-full max-w-lg z-10">
-                            {mode === "typing" ? (
-                                <form onSubmit={handleSubmit} className="relative flex items-center group">
-                                    <Input
-                                        type="text"
-                                        placeholder="이름을 입력하세요"
-                                        value={userInput}
-                                        onChange={(e) => setUserInput(e.target.value)}
-                                        disabled={gameState !== "playing"}
-                                        autoFocus
-                                        className="text-xl p-8 rounded-[1.5rem] pr-32 bg-white/5 border border-white/10 text-white placeholder:text-zinc-600 focus:bg-white/10 focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all text-center h-16 shadow-inner"
-                                    />
-                                    <Button
-                                        type="submit"
-                                        disabled={gameState !== "playing" || !userInput}
-                                        className="absolute right-2 top-2 bottom-2 h-auto px-6 rounded-xl bg-white text-black hover:bg-zinc-200 font-medium transition-all"
-                                    >
-                                        확인
-                                    </Button>
-                                </form>
+                            {isTextInputMode ? (
+                                <div className="space-y-3">
+                                    <form onSubmit={handleSubmit} className="flex items-center gap-2">
+                                        <Input
+                                            type="text"
+                                            placeholder="이름을 입력하세요"
+                                            value={userInput}
+                                            onChange={(e) => setUserInput(e.target.value)}
+                                            disabled={gameState !== "playing"}
+                                            autoFocus
+                                            className="text-xl p-8 rounded-[1.5rem] bg-white/5 border border-white/10 text-white placeholder:text-zinc-600 focus:bg-white/10 focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all text-center h-16 shadow-inner"
+                                        />
+
+                                        <Button
+                                            type="button"
+                                            onClick={toggleMic}
+                                            disabled={gameState !== "playing" || !supportsSpeechInput}
+                                            className={`h-16 w-16 rounded-2xl border transition-all ${micError
+                                                ? "bg-red-500/10 border-red-500/40 text-red-300 hover:bg-red-500/20"
+                                                : isMicEnabled
+                                                    ? "bg-emerald-500/15 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25"
+                                                    : "bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10"
+                                                }`}
+                                        >
+                                            {!isMicEnabled ? (
+                                                <MicOff className="w-5 h-5" />
+                                            ) : isListening ? (
+                                                <Volume2 className="w-5 h-5 animate-pulse" />
+                                            ) : (
+                                                <Mic className="w-5 h-5" />
+                                            )}
+                                        </Button>
+
+                                        <Button
+                                            type="submit"
+                                            disabled={gameState !== "playing" || !userInput}
+                                            className="h-16 px-6 rounded-2xl bg-white text-black hover:bg-zinc-200 font-medium transition-all"
+                                        >
+                                            확인
+                                        </Button>
+                                    </form>
+
+                                    {micError ? (
+                                        <div className="text-red-400 text-sm font-medium text-center bg-red-500/10 px-4 py-2 rounded-lg border border-red-500/20">
+                                            {micError}
+                                        </div>
+                                    ) : (
+                                        <div className="text-sm text-zinc-400 text-center">
+                                            {isMicEnabled
+                                                ? (isListening ? "마이크 듣는 중 · 말하면 자동 입력됩니다" : "마이크 켜짐 · 말하기를 시작해보세요")
+                                                : "입력창 옆 마이크 버튼을 누르면 음성 인식이 시작됩니다"}
+                                        </div>
+                                    )}
+                                </div>
                             ) : (
                                 <div className="flex flex-col items-center">
                                     <div className={`relative p-6 rounded-3xl mb-4 flex items-center justify-center transition-all duration-300 backdrop-blur-sm
