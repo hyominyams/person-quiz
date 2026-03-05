@@ -6,13 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GameMode } from "@/app/page";
 import { characters } from "@/data/characters";
-import { Timer, Mic, Volume2, XCircle, Heart, Info, ArrowRight } from "lucide-react";
+import { Timer, Mic, MicOff, Volume2, XCircle, Heart, Info, ArrowRight } from "lucide-react";
 
 interface GameProps {
     mode: GameMode;
     totalQuestions: number;
     onExit: () => void;
 }
+
+type GameState = "playing" | "correct" | "wrong" | "timeout" | "description" | "ended";
 
 const GAME_TIME_LIMIT = 30;
 const DESCRIPTION_TIME_LIMIT = 10;
@@ -25,8 +27,9 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     const [timeLeft, setTimeLeft] = useState(GAME_TIME_LIMIT);
     const [userInput, setUserInput] = useState("");
     const [isListening, setIsListening] = useState(false);
+    const [isMicEnabled, setIsMicEnabled] = useState(mode === "speaking");
     const [micError, setMicError] = useState<string | null>(null);
-    const [gameState, setGameState] = useState<"playing" | "correct" | "wrong" | "timeout" | "description" | "ended">("playing");
+    const [gameState, setGameState] = useState<GameState>("playing");
     const [score, setScore] = useState(0);
 
     // New Feature States
@@ -36,6 +39,10 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     const recognitionRef = useRef<any>(null);
     const hasAnsweredRef = useRef(false);
+    const isListeningRef = useRef(false);
+    const isMicEnabledRef = useRef(mode === "speaking");
+    const gameStateRef = useRef<GameState>("playing");
+    const restartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Initialize and shuffle, slicing based on selected totalQuestions
     useEffect(() => {
@@ -73,69 +80,161 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
         }
     }, [timeLeft, descriptionTimeLeft, gameState, showHint]);
 
-    // Speech Recognition setup
     useEffect(() => {
-        if (typeof window !== "undefined" && mode === "speaking") {
-            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-            if (SpeechRecognition) {
-                const recognition = new SpeechRecognition();
-                recognition.lang = "ko-KR";
-                recognition.continuous = true;
-                recognition.interimResults = false;
+        gameStateRef.current = gameState;
+    }, [gameState]);
 
-                recognition.onresult = (event: any) => {
-                    const transcript = Array.from(event.results)
-                        .map((result: any) => result[0]?.transcript ?? "")
-                        .join(" ")
-                        .trim();
-                    setUserInput(transcript);
-                };
+    useEffect(() => {
+        isMicEnabledRef.current = isMicEnabled;
+    }, [isMicEnabled]);
 
-                recognition.onerror = (event: any) => {
-                    console.error("Speech recognition error", event.error);
-                    setIsListening(false);
-                    if (event.error === 'not-allowed') {
-                        setMicError("마이크 권한이 차단되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
-                    } else if (event.error === 'no-speech') {
-                        // Ignore no-speech errors, we'll just show 'waiting...'
-                    } else {
-                        setMicError(`마이크 오류: ${event.error}`);
-                    }
-                };
-
-                recognition.onend = () => {
-                    setIsListening(false);
-                };
-
-                // Clear previous errors when starting anew
-                recognition.onstart = () => {
-                    setMicError(null);
-                };
-
-                recognitionRef.current = recognition;
-                startListening();
-            } else {
-                setMicError("이 브라우저는 음성 인식을 지원하지 않습니다. 크롬 브라우저를 사용해주세요.");
-            }
+    const clearRestartTimer = () => {
+        if (restartTimeoutRef.current) {
+            clearTimeout(restartTimeoutRef.current);
+            restartTimeoutRef.current = null;
         }
-
-        return () => {
-            if (recognitionRef.current) {
-                recognitionRef.current.stop();
-            }
-        };
-    }, [mode, currentIndex]);
+    };
 
     const startListening = () => {
-        if (recognitionRef.current && !isListening) {
+        if (!recognitionRef.current) return;
+        if (!isMicEnabledRef.current) return;
+        if (gameStateRef.current !== "playing" || hasAnsweredRef.current) return;
+        if (isListeningRef.current) return;
+
+        clearRestartTimer();
+
+        try {
+            recognitionRef.current.start();
+        } catch {
+            // Recognition might already be starting/running.
+        }
+    };
+
+    const stopListening = () => {
+        clearRestartTimer();
+        isListeningRef.current = false;
+        setIsListening(false);
+        if (recognitionRef.current) {
             try {
-                recognitionRef.current.start();
-                setIsListening(true);
-            } catch (e) {
-                // Recognition already started
+                recognitionRef.current.stop();
+            } catch {
+                // Ignore stop errors when recognition is already stopped.
             }
         }
     };
+
+    const toggleMic = () => {
+        if (isMicEnabledRef.current) {
+            isMicEnabledRef.current = false;
+            setIsMicEnabled(false);
+            stopListening();
+            setUserInput("");
+            return;
+        }
+
+        isMicEnabledRef.current = true;
+        setIsMicEnabled(true);
+        setMicError(null);
+        if (gameStateRef.current === "playing" && !hasAnsweredRef.current) {
+            startListening();
+        }
+    };
+
+    // Speech Recognition setup
+    useEffect(() => {
+        if (typeof window === "undefined" || mode !== "speaking") return;
+
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            setMicError("이 브라우저는 음성 인식을 지원하지 않습니다. 크롬 브라우저를 사용해주세요.");
+            setIsMicEnabled(false);
+            isMicEnabledRef.current = false;
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = "ko-KR";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+
+        recognition.onstart = () => {
+            isListeningRef.current = true;
+            setIsListening(true);
+            setMicError(null);
+        };
+
+        recognition.onresult = (event: any) => {
+            if (!isMicEnabledRef.current) return;
+            if (gameStateRef.current !== "playing" || hasAnsweredRef.current) return;
+
+            let finalTranscript = "";
+            let interimTranscript = "";
+            Array.from(event.results).forEach((result: any) => {
+                const transcript = result[0]?.transcript ?? "";
+                if (result.isFinal) {
+                    finalTranscript += `${transcript} `;
+                    return;
+                }
+                interimTranscript += `${transcript} `;
+            });
+
+            const transcript = `${finalTranscript}${interimTranscript}`.trim();
+            if (!transcript) return;
+
+            setUserInput(transcript);
+            checkAnswer(transcript);
+        };
+
+        recognition.onerror = (event: any) => {
+            console.error("Speech recognition error", event.error);
+            isListeningRef.current = false;
+            setIsListening(false);
+
+            if (event.error === "not-allowed") {
+                setMicError("마이크 권한이 차단되었습니다. 브라우저 설정에서 권한을 허용해주세요.");
+                setIsMicEnabled(false);
+                isMicEnabledRef.current = false;
+                return;
+            }
+
+            if (event.error === "no-speech" || event.error === "aborted") {
+                return;
+            }
+
+            setMicError(`마이크 오류: ${event.error}`);
+        };
+
+        recognition.onend = () => {
+            isListeningRef.current = false;
+            setIsListening(false);
+
+            if (!isMicEnabledRef.current) return;
+            if (gameStateRef.current !== "playing" || hasAnsweredRef.current) return;
+
+            clearRestartTimer();
+            restartTimeoutRef.current = setTimeout(() => {
+                startListening();
+            }, 250);
+        };
+
+        recognitionRef.current = recognition;
+        if (isMicEnabledRef.current && gameStateRef.current === "playing" && !hasAnsweredRef.current) {
+            startListening();
+        }
+
+        return () => {
+            clearRestartTimer();
+            if (recognitionRef.current) {
+                try {
+                    recognitionRef.current.stop();
+                } catch {
+                    // Ignore stop errors on cleanup.
+                }
+            }
+            isListeningRef.current = false;
+            setIsListening(false);
+        };
+    }, [mode, currentIndex]);
 
     const currentChar = shuffledChars[currentIndex];
 
@@ -157,17 +256,6 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
             });
         }
         return false;
-    };
-
-    const stopListening = () => {
-        if (recognitionRef.current) {
-            try {
-                recognitionRef.current.stop();
-            } catch {
-                // Ignore stop errors when recognition is already stopped.
-            }
-        }
-        setIsListening(false);
     };
 
     const handleCorrect = () => {
@@ -205,7 +293,8 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     };
 
     const checkAnswer = (inputVal: string) => {
-        if (gameState !== "playing" || hasAnsweredRef.current) return;
+        if (gameStateRef.current !== "playing" || hasAnsweredRef.current) return;
+        if (mode === "speaking" && (!isMicEnabledRef.current || !isListeningRef.current)) return;
 
         if (isAnswerCorrect(inputVal)) {
             handleCorrect();
@@ -223,14 +312,11 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
         }
     };
 
-    useEffect(() => {
-        if (mode !== "speaking" || gameState !== "playing") return;
-        if (!userInput.trim()) return;
-        checkAnswer(userInput);
-    }, [userInput, mode, gameState]);
-
     const nextQuestion = () => {
         if (currentIndex + 1 >= shuffledChars.length || lives <= 0) {
+            if (mode === "speaking") {
+                stopListening();
+            }
             setGameState("ended");
         } else {
             setCurrentIndex(i => i + 1);
@@ -239,7 +325,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
             setShowHint(false);
             setGameState("playing");
             hasAnsweredRef.current = false;
-            if (mode === "speaking") {
+            if (mode === "speaking" && isMicEnabledRef.current) {
                 startListening();
             }
         }
@@ -253,6 +339,22 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
             // play ddaeng (buzzer)
         }
     }, [gameState]);
+
+    const micStatusLabel = micError
+        ? "마이크 오류"
+        : !isMicEnabled
+            ? "마이크 꺼짐"
+            : isListening
+                ? "마이크 켜짐 · 듣는 중"
+                : "마이크 켜짐 · 대기 중";
+
+    const micStatusDotClass = micError
+        ? "bg-red-500"
+        : !isMicEnabled
+            ? "bg-zinc-600"
+            : isListening
+                ? "bg-green-500 animate-pulse"
+                : "bg-amber-400 animate-pulse";
 
     return (
         <div className="flex flex-col items-center min-h-screen bg-[#0a0a0a] text-zinc-100 relative p-4 font-sans selection:bg-indigo-500/30">
@@ -479,11 +581,12 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                                 <div className="flex flex-col items-center">
                                     <div className={`relative p-6 rounded-3xl mb-4 flex items-center justify-center transition-all duration-300 backdrop-blur-sm
                                         ${micError ? 'bg-red-500/10 border-red-500/30' :
-                                            isListening ? 'bg-white/10 shadow-[0_0_30px_rgba(255,255,255,0.1)] border-white/20' :
-                                                'bg-black/20 border-white/5'} border`}>
+                                            !isMicEnabled ? 'bg-black/20 border-white/5' :
+                                                isListening ? 'bg-white/10 shadow-[0_0_30px_rgba(255,255,255,0.1)] border-white/20' :
+                                                    'bg-amber-500/10 border-amber-400/30'} border`}>
 
                                         {/* Ripple effect when listening */}
-                                        {isListening && (
+                                        {isMicEnabled && isListening && (
                                             <>
                                                 <div className="absolute inset-0 rounded-3xl bg-white/5 animate-ping opacity-75" />
                                                 <div className="absolute inset-[-10px] rounded-[2rem] bg-white/5 animate-pulse opacity-50" />
@@ -492,41 +595,63 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
                                         <div className={`relative z-10 p-4 rounded-full transition-colors duration-300
                                             ${micError ? 'bg-red-500/20 text-red-400' :
-                                                isListening ? 'bg-white text-black' : 'bg-white/5 text-zinc-500'}`}>
-                                            {isListening ? <Volume2 className="w-8 h-8 animate-pulse" /> : <Mic className="w-8 h-8" />}
+                                                !isMicEnabled ? 'bg-white/5 text-zinc-500' :
+                                                    isListening ? 'bg-white text-black' : 'bg-amber-400/20 text-amber-300'}`}>
+                                            {!isMicEnabled ? (
+                                                <MicOff className="w-8 h-8" />
+                                            ) : isListening ? (
+                                                <Volume2 className="w-8 h-8 animate-pulse" />
+                                            ) : (
+                                                <Mic className="w-8 h-8" />
+                                            )}
                                         </div>
                                     </div>
 
-                                    {micError ? (
+                                    {micError && (
                                         <div className="text-red-400 text-sm font-medium text-center bg-red-500/10 px-4 py-2 rounded-lg border border-red-500/20 mb-2">
                                             {micError}
                                         </div>
-                                    ) : (
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-green-500 animate-pulse' : 'bg-zinc-600'}`} />
-                                            <span className={`text-sm font-medium ${isListening ? 'text-green-400' : 'text-zinc-500'}`}>
-                                                {isListening ? '듣고 있습니다...' : '마이크 꺼짐'}
-                                            </span>
-                                        </div>
                                     )}
+
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className={`w-2 h-2 rounded-full ${micStatusDotClass}`} />
+                                        <span className={`text-sm font-medium ${micError ? "text-red-400" : isMicEnabled ? (isListening ? "text-green-400" : "text-amber-300") : "text-zinc-500"}`}>
+                                            {micStatusLabel}
+                                        </span>
+                                    </div>
 
                                     <div className="text-xl font-medium text-zinc-300 text-center min-h-[3rem] px-8 py-2 w-full bg-white/5 rounded-xl border border-white/5">
                                         {userInput ? (
                                             <span className="text-white drop-shadow-md">{userInput}</span>
                                         ) : (
                                             <span className="text-zinc-600 font-light italic">
-                                                {isListening ? '(말씀하시면 이곳에 텍스트가 표시됩니다)' : '아래 버튼을 눌러 다시 활성화해주세요'}
+                                                {!isMicEnabled
+                                                    ? '마이크를 켜면 음성이 텍스트로 변환됩니다'
+                                                    : isListening
+                                                        ? '(말씀하시면 텍스트가 바로 반영됩니다)'
+                                                        : '마이크 연결 중... 잠시만 기다려주세요'}
                                             </span>
                                         )}
                                     </div>
 
-                                    {!isListening && gameState === "playing" && !micError && (
-                                        <Button
-                                            onClick={startListening}
-                                            className="mt-6 bg-indigo-600 text-white hover:bg-indigo-500 rounded-xl border border-transparent shadow-lg hover:shadow-indigo-500/25 px-8 font-medium transition-all"
-                                        >
-                                            <Mic className="mr-2 w-4 h-4" /> 마이크 켜기
-                                        </Button>
+                                    {gameState === "playing" && (
+                                        <div className="mt-6 flex items-center gap-3">
+                                            <Button
+                                                onClick={toggleMic}
+                                                className={`${isMicEnabled ? 'bg-red-500 text-white hover:bg-red-400' : 'bg-indigo-600 text-white hover:bg-indigo-500'} rounded-xl border border-transparent shadow-lg px-8 font-medium transition-all`}
+                                            >
+                                                {isMicEnabled ? <MicOff className="mr-2 w-4 h-4" /> : <Mic className="mr-2 w-4 h-4" />}
+                                                {isMicEnabled ? "마이크 끄기" : "마이크 켜기"}
+                                            </Button>
+                                            {isMicEnabled && !isListening && !micError && (
+                                                <Button
+                                                    onClick={startListening}
+                                                    className="bg-white/10 text-white hover:bg-white/20 rounded-xl border border-white/10 px-6 font-medium transition-all"
+                                                >
+                                                    다시 연결
+                                                </Button>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             )}
