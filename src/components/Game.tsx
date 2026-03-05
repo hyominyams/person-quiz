@@ -304,17 +304,13 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
             stopListening();
         }
         setGameState(state);
-        const newLives = lives - 1;
-        setLives(newLives);
+        setLives(l => l - 1);
 
-        if (newLives <= 0) {
-            setTimeout(() => setGameState("ended"), 1500);
-        } else {
-            // After showing X or Timeout, go to next question after a brief delay
-            // If they got it wrong, we don't necessarily show the description to save time, 
-            // but let's just move to next question.
-            setTimeout(nextQuestion, 1500);
-        }
+        // Even on wrong/timeout, always show the explanation card first.
+        setTimeout(() => {
+            setGameState("description");
+            setDescriptionTimeLeft(DESCRIPTION_TIME_LIMIT);
+        }, 1500);
     };
 
     const checkAnswer = (inputVal: string) => {
