@@ -21,6 +21,29 @@ const DESCRIPTION_TIME_LIMIT = 10;
 const HINT_REVEAL_TIME_LEFT = Math.floor(GAME_TIME_LIMIT / 2);
 const DANGER_TIME_THRESHOLD = 5;
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const maskAnswerTerms = (text: string, terms: string[]) => {
+    if (!text) return text;
+
+    const uniqueTerms = Array.from(
+        new Set(
+            terms
+                .map(term => term.trim())
+                .filter(term => term.length >= 2)
+        )
+    ).sort((a, b) => b.length - a.length);
+
+    return uniqueTerms.reduce((result, term) => {
+        const flexPattern = term
+            .split("")
+            .map(ch => escapeRegExp(ch))
+            .join("\\s*");
+
+        return result.replace(new RegExp(flexPattern, "gi"), "이 인물");
+    }, text);
+};
+
 export default function Game({ mode, totalQuestions, onExit }: GameProps) {
     const isSpeechMode = mode === "speaking";
     const isDescriptionQuizMode = mode === "descriptionQuiz";
@@ -251,9 +274,12 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
 
     const currentChar = shuffledChars[currentIndex];
     const gameTitle = isDescriptionQuizMode ? "설명 인물 퀴즈" : "인물 퀴즈";
-    const questionDescription = currentChar?.elementaryDescription || currentChar?.description || "설명이 없습니다.";
+    const rawQuestionDescription = currentChar?.elementaryDescription || currentChar?.description || "설명이 없습니다.";
+    const questionDescription = isDescriptionQuizMode && currentChar
+        ? maskAnswerTerms(rawQuestionDescription, [currentChar.name, ...(currentChar.synonyms ?? [])])
+        : rawQuestionDescription;
     const answerDescription = isDescriptionQuizMode
-        ? questionDescription
+        ? rawQuestionDescription
         : currentChar?.description || "설명이 없습니다.";
 
     const normalizeText = (text: string) =>
@@ -549,14 +575,16 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                                             initial={{ opacity: 0 }}
                                             animate={{ opacity: 1 }}
                                             exit={{ opacity: 0 }}
-                                            className="absolute inset-0 bg-emerald-500/20 flex flex-col items-center justify-center backdrop-blur-md border-[4px] border-emerald-500/50 rounded-[2rem]"
+                                            className="absolute inset-0 z-30 bg-emerald-500/20 flex flex-col items-center justify-center backdrop-blur-md border-[4px] border-emerald-500/50 rounded-[2rem]"
                                         >
                                             <motion.div initial={{ scale: 0.5, y: 20 }} animate={{ scale: 1, y: 0 }} className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(16,185,129,0.4)] mb-4">
                                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                                 </svg>
                                             </motion.div>
-                                            <span className="text-3xl font-bold text-white tracking-wide">정답</span>
+                                            <div className="px-6 py-3 rounded-2xl bg-zinc-950/80 border border-white/25 shadow-xl">
+                                                <span className="text-3xl font-bold text-white tracking-wide">정답</span>
+                                            </div>
                                         </motion.div>
                                     )}
                                     {gameState === "wrong" && (
@@ -564,7 +592,7 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                                             initial={{ opacity: 0 }}
                                             animate={{ opacity: 1 }}
                                             exit={{ opacity: 0 }}
-                                            className="absolute inset-0 bg-red-500/20 flex flex-col items-center justify-center backdrop-blur-md border-[4px] border-red-500/50 rounded-[2rem]"
+                                            className="absolute inset-0 z-30 bg-red-500/20 flex flex-col items-center justify-center backdrop-blur-md border-[4px] border-red-500/50 rounded-[2rem]"
                                         >
                                             <motion.div initial={{ scale: 0.5, y: 20 }} animate={{ scale: 1, y: 0 }} className="w-24 h-24 bg-red-500 rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(239,68,68,0.4)] mb-4">
                                                 <XCircle className="text-white w-12 h-12" />
@@ -576,11 +604,11 @@ export default function Game({ mode, totalQuestions, onExit }: GameProps) {
                                             initial={{ opacity: 0 }}
                                             animate={{ opacity: 1 }}
                                             exit={{ opacity: 0 }}
-                                            className="absolute inset-0 bg-zinc-950/80 flex items-center justify-center backdrop-blur-lg rounded-[2rem]"
+                                            className="absolute inset-0 z-30 bg-zinc-950/80 flex items-center justify-center backdrop-blur-lg rounded-[2rem]"
                                         >
-                                            <span className="flex flex-col items-center text-center">
+                                            <span className="flex flex-col items-center text-center bg-zinc-900/75 border border-white/15 rounded-2xl px-6 py-4 shadow-xl">
                                                 <span className="text-sm font-semibold text-zinc-500 uppercase tracking-widest mb-2">Time's Up</span>
-                                                <span className="text-4xl font-light text-white mb-8">{currentChar.name}</span>
+                                                <span className="text-4xl font-light text-white">{currentChar.name}</span>
                                             </span>
                                         </motion.div>
                                     )}
